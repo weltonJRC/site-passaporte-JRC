@@ -122,6 +122,7 @@ export async function requestInvitationOtp({
   return {
     success: true,
     message: "Código de ativação enviado com sucesso para o seu e-mail.",
+    devOtp: process.env.NODE_ENV !== "production" ? otpCode : undefined,
   };
 }
 

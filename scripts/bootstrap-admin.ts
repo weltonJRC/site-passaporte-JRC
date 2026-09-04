@@ -1,8 +1,7 @@
-import { PrismaClient, UserRole, UserStatus } from "@prisma/client";
+import { UserRole, UserStatus } from "@prisma/client";
+import { prisma } from "../src/lib/db/prisma";
 import { normalizeEmail } from "../src/lib/security/crypto";
 import { createAuditLog } from "../src/lib/domain/audit";
-
-const prisma = new PrismaClient();
 
 async function main() {
   const emailArg = process.argv.find((arg) => arg.startsWith("--email="))?.split("=")[1];

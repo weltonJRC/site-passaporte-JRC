@@ -47,8 +47,17 @@ export async function sendEmailOtp({
   const smtpFrom = process.env.SMTP_FROM || "Passaporte JRC <no-reply@jrc.com.br>";
 
   if (!smtpHost || !smtpUser || !smtpPass) {
-    // Modo de desenvolvimento sem SMTP configurado: armazena no sink local
+    // Modo de desenvolvimento sem SMTP configurado: armazena no sink e imprime no terminal
     testOtpSink.push({ email, otp, type, sentAt: new Date() });
+    console.log(`
+============================================================
+🔑 [CÓDIGO DE ACESSO - LOCAL / DEV]
+Destinatário: ${email}
+Código OTP:   ${otp}
+Finalidade:   ${type}
+Validade:     5 minutos
+============================================================
+`);
     return;
   }
 

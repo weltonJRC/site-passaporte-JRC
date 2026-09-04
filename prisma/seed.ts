@@ -1,10 +1,9 @@
-import { PrismaClient, UserRole, UserStatus, ProgramStatus, EventStatus } from "@prisma/client";
-import { generateInvitationBatch } from "../src/lib/domain/invitations";
-
-const prisma = new PrismaClient();
+import { UserRole, UserStatus, ProgramStatus, EventStatus, InvitationStatus } from "@prisma/client";
+import { prisma } from "../src/lib/db/prisma";
+import { hashInvitationToken } from "../src/lib/security/crypto";
 
 async function main() {
-  console.log("Iniciando seed de homologação com dados fictícios...");
+  console.log("Iniciando seed de homologação com dados para teste...");
 
   // 1. Programa JRC 2026
   const program = await prisma.program.upsert({
@@ -18,37 +17,55 @@ async function main() {
     update: {},
   });
 
-  // 2. Administrador Fictício
-  const adminEmail = process.env.BOOTSTRAP_ADMIN_EMAIL || "admin.homolog@exemplo-jrc.local";
-  const admin = await prisma.user.upsert({
-    where: { email: adminEmail.toLowerCase().trim() },
-    create: {
-      email: adminEmail.toLowerCase().trim(),
-      name: "Administrador Homologação",
-      role: UserRole.ADMIN,
-      status: UserStatus.ACTIVE,
-      emailVerified: true,
-    },
-    update: {},
-  });
+  // 2. Administradores Fictícios para Teste
+  const admins = [
+    { email: "admin@jrc.com.br", name: "Administrador JRC" },
+    { email: "admin.homolog@exemplo-jrc.local", name: "Administrador Homologação" },
+  ];
 
-  // 3. Atendente Fictício
-  const attendantEmail = "atendente.homolog@exemplo-jrc.local";
-  await prisma.user.upsert({
-    where: { email: attendantEmail },
-    create: {
-      email: attendantEmail,
-      name: "Atendente Homologação",
-      role: UserRole.ATTENDANT,
-      status: UserStatus.ACTIVE,
-      emailVerified: true,
-    },
-    update: {},
-  });
+  for (const adm of admins) {
+    await prisma.user.upsert({
+      where: { email: adm.email },
+      create: {
+        email: adm.email,
+        name: adm.name,
+        role: UserRole.ADMIN,
+        status: UserStatus.ACTIVE,
+        emailVerified: true,
+      },
+      update: {
+        role: UserRole.ADMIN,
+        status: UserStatus.ACTIVE,
+      },
+    });
+  }
+
+  // 3. Atendentes Fictícios para Teste
+  const attendants = [
+    { email: "atendente@jrc.com.br", name: "Atendente Recepção JRC" },
+    { email: "atendente.homolog@exemplo-jrc.local", name: "Atendente Homologação" },
+  ];
+
+  for (const att of attendants) {
+    await prisma.user.upsert({
+      where: { email: att.email },
+      create: {
+        email: att.email,
+        name: att.name,
+        role: UserRole.ATTENDANT,
+        status: UserStatus.ACTIVE,
+        emailVerified: true,
+      },
+      update: {
+        role: UserRole.ATTENDANT,
+        status: UserStatus.ACTIVE,
+      },
+    });
+  }
 
   // 4. Eventos Fictícios
   const now = new Date();
-  const event1 = await prisma.event.upsert({
+  await prisma.event.upsert({
     where: { id: "event-abertura-2026" },
     create: {
       id: "event-abertura-2026",
@@ -84,21 +101,55 @@ async function main() {
     update: {},
   });
 
-  // 5. 30 Convites Fictícios
-  const currentInvites = await prisma.invitation.count({
-    where: { programId: program.id },
+  await prisma.event.upsert({
+    where: { id: "event-encerramento-2026" },
+    create: {
+      id: "event-encerramento-2026",
+      programId: program.id,
+      name: "Painel de Encerramento e Premiação",
+      description: "Conclusão das atividades, contagem de carimbos e premiação",
+      location: "Espaço Lounge VIP",
+      startDate: new Date(now.getTime() + 72 * 3600000),
+      endDate: new Date(now.getTime() + 78 * 3600000),
+      status: EventStatus.ACTIVE,
+      orderIndex: 3,
+      stampIcon: "standard",
+      stampColor: "#e5a93b",
+    },
+    update: {},
   });
 
-  if (currentInvites === 0) {
-    const batch = await generateInvitationBatch({
-      count: 30,
-      adminUserId: admin.id,
-      baseUrl: process.env.APP_URL || "http://localhost:3000",
+  // 5. 30 Convites com Tokens Previsíveis para Homologação e Testes
+  console.log("Semeando os 30 convites de participantes...");
+  for (let i = 1; i <= 30; i++) {
+    const num = i.toString().padStart(2, "0");
+    const token = `convite-participante-${num}`;
+    const tokenHash = hashInvitationToken(token);
+
+    await prisma.invitation.upsert({
+      where: { id: `invitation-participante-${num}` },
+      create: {
+        id: `invitation-participante-${num}`,
+        programId: program.id,
+        tokenHash,
+        status: InvitationStatus.AVAILABLE,
+      },
+      update: {
+        tokenHash,
+        status: InvitationStatus.AVAILABLE,
+      },
     });
-    console.log(`Gerados ${batch.length} convites para o programa.`);
   }
 
-  console.log("Seed concluído com sucesso.");
+  console.log("\n========================================================");
+  console.log("✅ Seed concluído com sucesso!");
+  console.log("========================================================");
+  console.log("🛡️ ADMIN: admin@jrc.com.br (Login em /login)");
+  console.log("📱 ATENDENTE: atendente@jrc.com.br (Login em /login)");
+  console.log("🎟️ CONVITE 01: http://localhost:3000/convite/convite-participante-01");
+  console.log("🎟️ CONVITE 02: http://localhost:3000/convite/convite-participante-02");
+  console.log("... até convite-participante-30");
+  console.log("========================================================\n");
 }
 
 main()

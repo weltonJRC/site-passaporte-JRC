@@ -15,6 +15,7 @@ export default function InvitationPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [devOtp, setDevOtp] = useState<string | null>(null);
 
   const handleRequestOtp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,6 +32,10 @@ export default function InvitationPage() {
       const data = await res.json();
       if (!res.ok) {
         throw new Error(data.error || "Erro ao solicitar código de ativação.");
+      }
+
+      if (data.devOtp) {
+        setDevOtp(data.devOtp);
       }
 
       setStep("OTP");
@@ -148,6 +153,21 @@ export default function InvitationPage() {
           </form>
         ) : (
           <form onSubmit={handleConfirmOtp} className="space-y-4">
+            {devOtp && (
+              <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-center text-sm text-amber-300">
+                <div className="font-semibold text-xs uppercase tracking-wider text-amber-400">💡 Modo Local / Demonstração</div>
+                <div className="text-xs text-muted mt-0.5">Seu código de ativação gerado é:</div>
+                <div className="my-1.5 text-2xl font-mono font-bold tracking-widest text-amber-300">{devOtp}</div>
+                <button
+                  type="button"
+                  onClick={() => setOtp(devOtp)}
+                  className="mt-1 text-xs rounded-lg bg-amber-500/20 hover:bg-amber-500/30 px-3 py-1.5 font-medium border border-amber-500/40 transition text-amber-200"
+                >
+                  Preencher código automaticamente
+                </button>
+              </div>
+            )}
+
             <div>
               <label htmlFor="otp" className="block text-sm font-medium text-foreground mb-1">
                 Código de 6 dígitos enviado ao e-mail

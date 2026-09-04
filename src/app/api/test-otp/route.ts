@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { getLastTestOtp } from "@/lib/email/sender";
 
 export async function GET(req: NextRequest) {
-  // CRÍTICO: Esta rota é restrita EXCLUSIVAMENTE ao ambiente de teste
-  if (process.env.NODE_ENV !== "test") {
+  // CRÍTICO: Esta rota é restrita a ambientes que não sejam produção
+  if (process.env.NODE_ENV === "production") {
     return new NextResponse(null, { status: 404 });
   }
 

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { authClient } from "@/lib/auth/client";
 
 export default function LoginPage() {
@@ -12,22 +13,43 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [devOtp, setDevOtp] = useState<string | null>(null);
+  const [userNotFoundNotice, setUserNotFoundNotice] = useState(false);
 
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setMessage(null);
+    setDevOtp(null);
+    setUserNotFoundNotice(false);
     setLoading(true);
+
+    const cleanEmail = email.trim().toLowerCase();
 
     try {
       // Proteção contra enumeração de contas: sempre mostra mensagem genérica
       await authClient.emailOtp.sendVerificationOtp({
-        email: email.trim().toLowerCase(),
+        email: cleanEmail,
         type: "sign-in",
       });
 
       setStep("OTP");
       setMessage("Se o e-mail estiver cadastrado, você receberá um código de 6 dígitos em sua caixa de entrada.");
+
+      // Em ambiente de desenvolvimento/local, busca o OTP gerado para facilitar testes
+      try {
+        const testRes = await fetch(`/api/test-otp?email=${encodeURIComponent(cleanEmail)}`);
+        if (testRes.ok) {
+          const data = await testRes.json();
+          if (data.otp) {
+            setDevOtp(data.otp);
+          }
+        } else if (testRes.status === 404) {
+          setUserNotFoundNotice(true);
+        }
+      } catch {
+        // Fallback silencioso
+      }
     } catch {
       setStep("OTP");
       setMessage("Se o e-mail estiver cadastrado, você receberá um código de 6 dígitos em sua caixa de entrada.");
@@ -129,9 +151,62 @@ export default function LoginPage() {
             >
               {loading ? "Enviando código..." : "Receber Código OTP"}
             </button>
+
+            <div className="mt-4 pt-4 border-t border-muted/20">
+              <p className="text-xs text-muted mb-2 text-center font-medium">Contas pré-cadastradas para teste local:</p>
+              <div className="flex flex-col gap-1.5 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setEmail("admin@jrc.com.br")}
+                  className="w-full text-left px-3 py-2 rounded-lg bg-surface/80 border border-muted/20 hover:border-primary/40 text-muted hover:text-foreground transition flex justify-between items-center"
+                >
+                  <span>🛡️ <strong>Administrador:</strong> admin@jrc.com.br</span>
+                  <span className="text-primary font-semibold text-[11px] underline">Usar</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEmail("atendente@jrc.com.br")}
+                  className="w-full text-left px-3 py-2 rounded-lg bg-surface/80 border border-muted/20 hover:border-primary/40 text-muted hover:text-foreground transition flex justify-between items-center"
+                >
+                  <span>📱 <strong>Atendente:</strong> atendente@jrc.com.br</span>
+                  <span className="text-primary font-semibold text-[11px] underline">Usar</span>
+                </button>
+              </div>
+              <p className="text-[11px] text-muted/70 mt-2.5 text-center">
+                Para participante novo, ative um <Link href="/convite/convite-participante-01" className="text-premium underline hover:text-foreground">link de convite exclusivo</Link>.
+              </p>
+            </div>
           </form>
         ) : (
           <form onSubmit={handleVerifyOtp} className="space-y-4">
+            {devOtp && (
+              <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3 text-center text-sm text-amber-300">
+                <div className="font-semibold text-xs uppercase tracking-wider text-amber-400">💡 Modo Local / Demonstração</div>
+                <div className="text-xs text-muted mt-0.5">Seu código de acesso gerado é:</div>
+                <div className="my-1.5 text-2xl font-mono font-bold tracking-widest text-amber-300">{devOtp}</div>
+                <button
+                  type="button"
+                  onClick={() => setOtp(devOtp)}
+                  className="mt-1 text-xs rounded-lg bg-amber-500/20 hover:bg-amber-500/30 px-3 py-1.5 font-medium border border-amber-500/40 transition text-amber-200"
+                >
+                  Preencher código automaticamente
+                </button>
+              </div>
+            )}
+
+            {userNotFoundNotice && (
+              <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-3.5 text-xs text-amber-300">
+                <p className="font-bold text-sm mb-1 text-amber-400">⚠️ E-mail não cadastrado</p>
+                <p>O sistema funciona <strong>estritamente por convite</strong>. O e-mail informado ainda não foi registrado.</p>
+                <p className="mt-2 font-medium">
+                  👉 Para se cadastrar como participante:{" "}
+                  <Link href="/convite/convite-participante-01" className="underline font-bold text-foreground hover:text-premium">
+                    Ativar Convite 01
+                  </Link>
+                </p>
+              </div>
+            )}
+
             <div>
               <label htmlFor="otp" className="block text-sm font-medium text-foreground mb-1">
                 Código de 6 dígitos
@@ -161,6 +236,8 @@ export default function LoginPage() {
               onClick={() => {
                 setStep("EMAIL");
                 setOtp("");
+                setDevOtp(null);
+                setUserNotFoundNotice(false);
                 setError(null);
                 setMessage(null);
               }}
