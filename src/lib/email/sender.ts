@@ -52,7 +52,7 @@ export async function sendEmailOtp({
     return;
   }
 
-  const transporter = nodemailer.createTransporter({
+  const transporter = nodemailer.createTransport({
     host: smtpHost,
     port: smtpPort,
     secure: smtpPort === 465,
@@ -71,11 +71,7 @@ export async function sendEmailOtp({
     from: smtpFrom,
     to: email,
     subject,
-    text: `Olá,
-
-Seu código de verificação para o Passaporte JRC é: ${otp}
-
-Este código expira em 5 minutos.`,
+    text: `Olá,\n\nSeu código de verificação para o Passaporte JRC é: ${otp}\n\nEste código expira em 5 minutos.`,
     html: `
       <div style="font-family: sans-serif; background-color: #071725; color: #f7f8fa; padding: 24px; border-radius: 8px;">
         <h2 style="color: #cdaa63; margin-bottom: 16px;">Passaporte de Eventos JRC</h2>

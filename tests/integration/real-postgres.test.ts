@@ -13,7 +13,6 @@ process.env.INVITATION_TOKEN_SECRET = "test_invitation_secret_must_be_32_chars_m
 process.env.QR_TOKEN_SECRET = "test_qr_secret_must_be_32_chars_min_length";
 process.env.RATE_LIMIT_SECRET = "test_rate_limit_secret_32_chars_minimum";
 process.env.BETTER_AUTH_SECRET = "test_better_auth_secret_32_chars_minimum";
-process.env.NODE_ENV = "test";
 
 const prisma = new PrismaClient({
   datasources: { db: { url: testDbUrl } },
@@ -122,8 +121,6 @@ describe("Integração com PostgreSQL Real (Docker porta 5433)", () => {
     });
     expect(availableInvite).toBeTruthy();
 
-    // Encontra o token correspondente gerando um novo convite dedicado
-    // Para teste seguro, vamos revogar um e criar um específico com token conhecido
     const admin = await prisma.user.findFirst({ where: { role: UserRole.ADMIN } });
     await revokeInvitation({ invitationId: availableInvite!.id, adminUserId: admin!.id });
 
@@ -181,7 +178,6 @@ describe("Integração com PostgreSQL Real (Docker porta 5433)", () => {
 
   it("4. Um e-mail não pode ter dois passaportes no mesmo programa", async () => {
     const admin = await prisma.user.findFirst({ where: { role: UserRole.ADMIN } });
-    // Libera vaga revogando um e criando outro
     const avail = await prisma.invitation.findFirst({ where: { status: InvitationStatus.AVAILABLE } });
     await revokeInvitation({ invitationId: avail!.id, adminUserId: admin!.id });
     const batch = await generateInvitationBatch({ count: 1, adminUserId: admin!.id, baseUrl: "http://localhost:3000" });

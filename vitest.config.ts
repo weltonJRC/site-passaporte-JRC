@@ -6,7 +6,6 @@ process.env.INVITATION_TOKEN_SECRET = process.env.INVITATION_TOKEN_SECRET || "te
 process.env.QR_TOKEN_SECRET = process.env.QR_TOKEN_SECRET || "test_qr_secret_32_chars_minimum_length";
 process.env.RATE_LIMIT_SECRET = process.env.RATE_LIMIT_SECRET || "test_rate_limit_secret_32_chars_minimum";
 process.env.BETTER_AUTH_SECRET = process.env.BETTER_AUTH_SECRET || "test_better_auth_secret_32_chars_minimum";
-process.env.NODE_ENV = "test";
 
 export default defineConfig({
   test: {
