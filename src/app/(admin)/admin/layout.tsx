@@ -5,6 +5,8 @@ import { UserRole } from "@prisma/client";
 
 import { AdminLogoutButton } from "@/components/admin/AdminLogoutButton";
 
+export const dynamic = "force-dynamic";
+
 export default async function AdminLayout({
   children,
 }: {

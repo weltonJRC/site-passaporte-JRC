@@ -1,0 +1,14 @@
+.git
+.github
+.next
+node_modules
+coverage
+test-results
+playwright-report
+backups
+.env*
+*.pem
+*.key
+*.cert
+*.log
+*.tsbuildinfo
