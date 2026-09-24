@@ -10,7 +10,7 @@ Este guia descreve o procedimento para deploy contínuo da aplicação no **Dokp
 
 1. Instância Dokploy ativa com suporte a Docker e SSL automático (Let's Encrypt / Traefik).
 2. Serviço de Banco de Dados PostgreSQL 16 provisionado (Dokploy Database ou externo).
-3. Credenciais de envio de e-mail SMTP transacional (Mailgun, SendGrid ou similar).
+3. Credenciais SMTP apenas para recuperação de senha por e-mail e convites individuais por e-mail.
 
 ---
 
@@ -21,7 +21,8 @@ Configure no painel de Environment Variables da aplicação no Dokploy:
 ```env
 # Ambiente e URLs
 NODE_ENV=production
-NEXT_PUBLIC_APP_URL=https://passaporte.seudominio.com.br
+APP_URL=https://passaporte.seudominio.com.br
+BETTER_AUTH_URL=https://passaporte.seudominio.com.br
 PORT=3000
 
 # Conexão com Banco de Dados PostgreSQL
@@ -34,16 +35,20 @@ QR_TOKEN_SECRET=gerar_outro_hex_de_32_bytes_aqui
 RATE_LIMIT_SECRET=gerar_outro_hex_de_32_bytes_aqui
 
 # Provedor de E-mail Transacional (SMTP)
-EMAIL_FROM=no-reply@passaporte.seudominio.com.br
+SMTP_FROM=Passaporte JRC <no-reply@passaporte.seudominio.com.br>
 SMTP_HOST=smtp.mailgun.org
 SMTP_PORT=587
 SMTP_USER=postmaster@mg.seudominio.com.br
-SMTP_PASS=sua_senha_smtp_aqui
+SMTP_PASSWORD=sua_senha_smtp_aqui
 ```
 
 ---
 
 ## 4. Tipo de Build no Dokploy
+
+O workflow do GitHub publica a imagem `ghcr.io/weltonjrc/site-passaporte-jrc:latest` após o CI da branch `main`. Para fixar uma versão, use `ghcr.io/weltonjrc/site-passaporte-jrc:sha-COMMIT_COMPLETO`. O pacote pode exigir autenticação no GHCR conforme a visibilidade configurada no GitHub.
+
+Se o Dokploy já constrói pelo GitHub, mantenha o build atual a partir do `Dockerfile`; ele usa exatamente o mesmo código do `main`.
 
 - **Build Type**: `Dockerfile`
 - **Dockerfile Path**: `./Dockerfile`
