@@ -35,6 +35,8 @@ export function AdminConvitesClient({
   >([]);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [bulkResults, setBulkResults] = useState<Array<{ id: string; name: string; kind: string; status: string; detail?: string; whatsappUrl?: string }>>([]);
+  const [bulkProgress, setBulkProgress] = useState(0);
 
   // Formulário de Convite Individual
   const [showInviteForm, setShowInviteForm] = useState(false);
@@ -60,6 +62,7 @@ export function AdminConvitesClient({
         body: JSON.stringify({
           recipientName: clientName,
           recipientEmail: clientEmail,
+          recipientPhone: clientPhone,
         }),
       });
 
@@ -190,6 +193,39 @@ export function AdminConvitesClient({
     setTimeout(() => setCopiedId(null), 2500);
   };
 
+  const handleBulkDispatch = async (mode: "EMAIL" | "PREPARE") => {
+    if (mode === "EMAIL" && !confirm("Enviar agora por e-mail para todos os destinatários com endereço cadastrado? Convites pendentes receberão um link adicional.")) return;
+    if (mode === "PREPARE" && !confirm("Preparar mensagens de WhatsApp para todos? Convites pendentes receberão um link adicional; o envio continuará manual.")) return;
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+    setBulkResults([]);
+    setBulkProgress(0);
+    try {
+      let cursor: string | null = null;
+      const all: typeof bulkResults = [];
+      do {
+        const response: Response = await fetch("/api/admin/invitations/bulk-send", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode, cursor }),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Falha no processamento em massa.");
+        all.push(...data.results);
+        setBulkResults([...all]);
+        setBulkProgress(all.length);
+        cursor = data.nextCursor;
+      } while (cursor);
+      const done = all.filter((item) => item.status === "SENT" || item.status === "PREPARED").length;
+      setSuccess(mode === "EMAIL"
+        ? `${done} e-mail(s) enviado(s). ${all.length - done} destinatário(s) sem e-mail ou com falha.`
+        : `${done} mensagem(ns) preparada(s). Abra cada conversa para enviar pelo WhatsApp.`);
+      router.refresh();
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : "Falha no processamento em massa.");
+    } finally { setLoading(false); }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -201,6 +237,14 @@ export function AdminConvitesClient({
         </div>
 
         <div className="flex flex-wrap gap-2">
+          <button onClick={() => handleBulkDispatch("EMAIL")} disabled={loading}
+            className="rounded-xl bg-secondary px-4 py-2 text-xs font-bold text-background disabled:opacity-50">
+            Enviar todos por e-mail
+          </button>
+          <button onClick={() => handleBulkDispatch("PREPARE")} disabled={loading}
+            className="rounded-xl border border-secondary/40 px-4 py-2 text-xs font-bold text-secondary disabled:opacity-50">
+            Preparar WhatsApp de todos
+          </button>
           <button
             onClick={() => setShowInviteForm(!showInviteForm)}
             className="rounded-xl bg-gradient-to-r from-primary to-secondary px-4 py-2 text-xs font-bold text-white shadow hover:opacity-95 transition"
@@ -248,6 +292,16 @@ export function AdminConvitesClient({
         </div>
       )}
 
+      {loading && bulkProgress > 0 && <p role="status" className="text-xs text-muted">{bulkProgress} destinatários processados...</p>}
+      {bulkResults.length > 0 && <section className="rounded-2xl border border-secondary/30 bg-surface p-4 space-y-2">
+        <h2 className="text-sm font-bold">Resultado do lote</h2>
+        <div className="max-h-72 space-y-2 overflow-y-auto">{bulkResults.map((item) => <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-muted/10 py-2 text-xs">
+          <span>{item.name} · {item.kind === "LOGIN" ? "Acesso" : "Convite"} · {item.status === "SENT" ? "E-mail enviado" : item.status === "PREPARED" ? "Pronto para WhatsApp" : item.status === "SKIPPED" ? "Ignorado" : "Falhou"}</span>
+          {item.detail && <span className="text-danger">{item.detail}</span>}
+          {item.whatsappUrl && <a href={item.whatsappUrl} target="_blank" rel="noopener noreferrer" className="font-bold text-secondary">Abrir WhatsApp</a>}
+        </div>)}</div>
+      </section>}
+
       {/* Formulário para Convidar Cliente Específico */}
       {showInviteForm && (
         <form onSubmit={handleSendSingleInvite} className="rounded-2xl border border-primary/30 bg-surface p-6 shadow-xl space-y-4">
@@ -274,7 +328,7 @@ export function AdminConvitesClient({
             </div>
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider text-muted mb-1">
-                WhatsApp do Cliente (Opcional)
+                WhatsApp do Cliente (DDD)
               </label>
               <input
                 type="tel"

@@ -27,6 +27,7 @@ export default async function AdminParticipantesPage() {
         id: p.user.id,
         name: p.user.name,
         email: p.user.email,
+        phoneE164: p.user.phoneE164,
         image: p.user.image,
         realEstateAgency: p.user.realEstateAgency,
         passportId: p.id,

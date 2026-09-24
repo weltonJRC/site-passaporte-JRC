@@ -19,7 +19,7 @@ describe("Segurança de Cadastro: Exclusivamente Invite-Only", () => {
     await prisma.$disconnect();
   });
 
-  it("1. Chamada de cadastro por email/senha é desabilitada no Better Auth", async () => {
+  it("1. Cadastro direto por email/senha sem convite é barrado pelo hook", async () => {
     const uninvitedEmail = "hacker_invasor@externo.com";
 
     // Tentativa direta de chamar a API interna do Better Auth para criar usuário por senha
@@ -31,7 +31,7 @@ describe("Segurança de Cadastro: Exclusivamente Invite-Only", () => {
           name: "Invasor Sem Convite",
         },
       })
-    ).rejects.toThrow(/Email and password sign up is not enabled/);
+    ).rejects.toThrow(/Failed to create user|Cadastro permitido exclusivamente/);
 
     const userInDb = await prisma.user.findUnique({
       where: { email: uninvitedEmail },

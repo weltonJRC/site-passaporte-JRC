@@ -19,6 +19,7 @@ export function ConviteClient({
 
   const [name, setName] = useState(initialName);
   const [email, setEmail] = useState(initialEmail);
+  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [realEstateAgency, setRealEstateAgency] = useState("");
   const [lgpdAccepted, setLgpdAccepted] = useState(false);
@@ -55,6 +56,7 @@ export function ConviteClient({
           token: token.trim(),
           name: name.trim(),
           email: email.trim(),
+          phone: phone.trim(),
           password: password.trim(),
           realEstateAgency: realEstateAgency.trim(),
           lgpdConsent: true,
@@ -236,6 +238,12 @@ export function ConviteClient({
               placeholder="seu.nome@empresa.com.br"
               className="h-11 w-full rounded-xl border border-muted/30 bg-background px-4 text-sm text-foreground placeholder:text-muted/40 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
             />
+          </div>
+
+          <div>
+            <label htmlFor="phone" className="block text-xs font-semibold uppercase tracking-wider text-muted mb-1">WhatsApp com DDD *</label>
+            <input id="phone" type="tel" inputMode="tel" required value={phone} onChange={(e) => setPhone(e.target.value)}
+              placeholder="(11) 98765-4321" className="h-11 w-full rounded-xl border border-muted/30 bg-background px-4 text-sm text-foreground" />
           </div>
 
           <div>

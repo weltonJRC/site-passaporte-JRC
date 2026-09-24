@@ -1,15 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
-import { hashInvitationToken, normalizeEmail } from "@/lib/security/crypto";
+import { normalizeEmail } from "@/lib/security/crypto";
 import { createAuditLog } from "@/lib/domain/audit";
 import { checkRateLimit } from "@/lib/rate-limit/postgres-rate-limit";
 import { InvitationStatus, RegistrationStatus } from "@prisma/client";
+import { normalizeBrazilianMobile } from "@/lib/security/phone";
+import { getInvitationByToken } from "@/lib/domain/invitations";
+import { withInvitationContext } from "@/lib/auth/invitation-context";
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { token, name, email, password, realEstateAgency, birthDate, lgpdConsent } = body;
+    const { token, name, email, phone, password, realEstateAgency, birthDate, lgpdConsent } = body;
 
     // 1. Validações de Entrada
     if (!token || typeof token !== "string") {
@@ -34,6 +37,7 @@ export async function POST(req: NextRequest) {
     }
 
     const cleanEmail = normalizeEmail(email);
+    const phoneE164 = normalizeBrazilianMobile(phone || "");
 
     if (!password || typeof password !== "string" || password.trim().length < 4) {
       return NextResponse.json(
@@ -96,13 +100,13 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // 4. Verificação rápida prévia do convite (sem travar pool)
-    const tokenHash = hashInvitationToken(token.trim());
+    const existingPhone = await prisma.user.findUnique({ where: { phoneE164 } });
+    if (existingPhone) {
+      return NextResponse.json({ error: "Este WhatsApp já possui cadastro. Entre pela tela de login." }, { status: 409 });
+    }
 
-    const checkInv = await prisma.invitation.findFirst({
-      where: { tokenHash },
-      select: { id: true, status: true, programId: true, claimedEmail: true },
-    });
+    // 4. Verificação rápida prévia do convite (sem travar pool)
+    const checkInv = await getInvitationByToken(token.trim());
 
     if (!checkInv) {
       return NextResponse.json(
@@ -123,7 +127,7 @@ export async function POST(req: NextRequest) {
       async (tx) => {
         // Lock do convite
         const lockedInv = await tx.$queryRaw<Array<{ id: string; status: string; programId: string; claimedEmail: string | null }>>`
-          SELECT "id", "status", "programId", "claimedEmail" FROM "Invitation" WHERE "tokenHash" = ${tokenHash} FOR UPDATE
+          SELECT "id", "status", "programId", "claimedEmail" FROM "Invitation" WHERE "id" = ${checkInv.id} FOR UPDATE
         `;
 
         if (!lockedInv || lockedInv.length === 0) {
@@ -140,6 +144,15 @@ export async function POST(req: NextRequest) {
       if (inv.claimedEmail && inv.claimedEmail.toLowerCase() !== cleanEmail) {
         throw new Error(`Este convite foi emitido exclusivamente para o e-mail ${inv.claimedEmail}.`);
       }
+
+      const invitePhone = await tx.invitation.findUnique({ where: { id: inv.id }, select: { recipientPhoneE164: true } });
+      if (invitePhone?.recipientPhoneE164 && invitePhone.recipientPhoneE164 !== phoneE164) {
+        throw new Error("Este convite foi emitido para outro número de WhatsApp.");
+      }
+      const otherPhone = await tx.invitation.findFirst({
+        where: { id: { not: inv.id }, recipientPhoneE164: phoneE164, status: { in: ["AVAILABLE", "SENT", "USED"] } },
+      });
+      if (otherPhone) throw new Error("Este WhatsApp já está vinculado a outro convite.");
 
       // Lock do Programa para checagem estrita da capacidade máxima (30) - AGENTS.md 2.1
       const lockedProgram = await tx.$queryRaw<Array<{ id: string; capacity: number }>>`
@@ -172,12 +185,14 @@ export async function POST(req: NextRequest) {
           programId: inv.programId,
           invitationId: inv.id,
           normalizedEmail: cleanEmail,
+          phoneE164,
           name: name.trim(),
           status: RegistrationStatus.OTP_VERIFIED,
           expiresAt,
         },
         update: {
           normalizedEmail: cleanEmail,
+          phoneE164,
           name: name.trim(),
           status: RegistrationStatus.OTP_VERIFIED,
           expiresAt,
@@ -202,18 +217,19 @@ export async function POST(req: NextRequest) {
       }
     });
 
-    const signUpRes = await auth.api.signUpEmail({
+    const signUpRes = await withInvitationContext({ invitationId: txResult.invitationId, email: cleanEmail, phoneE164 }, () => auth.api.signUpEmail({
       body: {
         name: name.trim(),
         email: cleanEmail,
         password: password.trim(),
         realEstateAgency: realEstateAgency.trim(),
+        phoneE164,
         birthDate: birthDate ? new Date(birthDate) : undefined,
         lgpdConsent: true,
       },
       headers: cleanHeaders,
       asResponse: true,
-    });
+    }));
 
     if (!signUpRes.ok) {
       const errData = await signUpRes.json().catch(() => ({}));
@@ -236,6 +252,7 @@ export async function POST(req: NextRequest) {
           usedAt: new Date(),
           claimedName: name.trim(),
           claimedEmail: cleanEmail,
+          recipientPhoneE164: phoneE164,
         },
       });
 

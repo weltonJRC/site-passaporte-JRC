@@ -177,8 +177,14 @@ export async function markInvitationAsSent({
 
 export async function getInvitationByToken(rawToken: string) {
   const tokenHash = hashInvitationToken(rawToken);
-  return await prisma.invitation.findUnique({
+  const primary = await prisma.invitation.findUnique({
     where: { tokenHash },
     include: { program: true },
   });
+  if (primary) return primary;
+  const delivery = await prisma.invitationDeliveryToken.findUnique({
+    where: { tokenHash },
+    include: { invitation: { include: { program: true } } },
+  });
+  return delivery?.invitation ?? null;
 }

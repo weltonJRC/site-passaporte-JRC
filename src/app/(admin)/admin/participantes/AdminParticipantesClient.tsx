@@ -7,6 +7,7 @@ interface ParticipantItem {
   id: string; // userId
   name: string;
   email: string;
+  phoneE164: string | null;
   image: string | null;
   realEstateAgency: string | null;
   passportId: string;
@@ -64,6 +65,25 @@ export function AdminParticipantesClient({
     }
   };
 
+  const handleEditPhone = async (p: ParticipantItem) => {
+    const phone = prompt(`WhatsApp de ${p.name} com DDD:`, p.phoneE164 || "");
+    if (phone === null) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/admin/participants", {
+        method: "PATCH", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: p.id, phone }),
+      });
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "Erro ao salvar WhatsApp.");
+      setSuccess("WhatsApp atualizado.");
+      router.refresh();
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : "Erro ao salvar WhatsApp.");
+    } finally { setLoading(false); }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -98,6 +118,7 @@ export function AdminParticipantesClient({
                 <th className="p-4">Participante</th>
                 <th className="p-4">Imobiliária</th>
                 <th className="p-4">E-mail</th>
+                <th className="p-4">WhatsApp</th>
                 <th className="p-4">Passaporte</th>
                 <th className="p-4">Carimbos (de 12)</th>
                 <th className="p-4">Termo LGPD</th>
@@ -108,7 +129,7 @@ export function AdminParticipantesClient({
             <tbody className="divide-y divide-muted/10">
               {participants.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="p-8 text-center text-muted">
+                  <td colSpan={9} className="p-8 text-center text-muted">
                     Nenhum participante cadastrado até o momento.
                   </td>
                 </tr>
@@ -137,6 +158,7 @@ export function AdminParticipantesClient({
                       )}
                     </td>
                     <td className="p-4 text-muted">{p.email}</td>
+                    <td className="p-4 text-muted">{p.phoneE164 || "Não informado"}</td>
                     <td className="p-4 font-mono font-bold text-secondary">{p.passportNumber}</td>
                     <td className="p-4 font-bold text-success">
                       {p.stampsCount} / 12
@@ -160,6 +182,8 @@ export function AdminParticipantesClient({
                       })}
                     </td>
                     <td className="p-4 text-right">
+                      <button onClick={() => handleEditPhone(p)} disabled={loading}
+                        className="mr-2 rounded-lg border border-primary/30 px-2.5 py-1 text-[11px] font-semibold text-primary">WhatsApp</button>
                       <button
                         onClick={() => handleDeleteParticipant(p)}
                         disabled={loading}
