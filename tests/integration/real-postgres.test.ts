@@ -1,11 +1,16 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { PrismaClient, UserRole, UserStatus, InvitationStatus, StampStatus, QrChallengeStatus } from "@prisma/client";
-import { generateInvitationBatch, revokeInvitation } from "../../src/lib/domain/invitations";
+import { generateInvitationBatch, revokeInvitation, getInvitationByToken } from "../../src/lib/domain/invitations";
 import { requestInvitationOtp, confirmInvitationOtpAndCreatePassport } from "../../src/lib/domain/registration";
 import { generateQrChallengeForUser } from "../../src/lib/domain/qr";
 import { confirmStamp, cancelStamp } from "../../src/lib/domain/stamps";
 import { checkRateLimit, cleanupExpiredBuckets } from "../../src/lib/rate-limit/postgres-rate-limit";
 import { getLastTestOtp } from "../../src/lib/email/sender";
+import { createEventReview } from "../../src/lib/domain/event-reviews";
+import { completePasswordRecovery, requestPasswordRecovery } from "../../src/lib/domain/password-recovery";
+import { auth } from "../../src/lib/auth/auth";
+import { withInvitationContext } from "../../src/lib/auth/invitation-context";
+import { generateSecureToken, hashInvitationToken } from "../../src/lib/security/crypto";
 
 const testDbUrl = "postgresql://jrc_test_user:jrc_test_password@localhost:5433/jrc_passaporte_test?schema=public";
 process.env.DATABASE_URL = testDbUrl;
@@ -354,5 +359,70 @@ describe("Integração com PostgreSQL Real (Docker porta 5433)", () => {
 
     const cleaned = await cleanupExpiredBuckets();
     expect(typeof cleaned).toBe("number");
+  });
+
+  it("9. Avaliação só é aceita após carimbo e uma vez por evento", async () => {
+    const user = await prisma.user.findUnique({ where: { email: "participante1@empresa.com.br" } });
+    const stamped = await prisma.stamp.findFirst({ where: { passport: { userId: user!.id }, status: "CONFIRMED" } });
+    const otherEvent = await prisma.event.create({ data: {
+      programId: (await prisma.passport.findUnique({ where: { userId: user!.id } }))!.programId,
+      name: "Evento sem presença", startDate: new Date(), endDate: new Date(Date.now() + 3600000), status: "ACTIVE",
+    } });
+    await expect(createEventReview(user!.id, otherEvent.id, 8, "Bom")).rejects.toThrow(/após o carimbo/);
+    const review = await createEventReview(user!.id, stamped!.eventId, 10, "  Excelente  ");
+    expect(review.feedback).toBe("Excelente");
+    await expect(createEventReview(user!.id, stamped!.eventId, 9, "Outra nota")).rejects.toMatchObject({ code: "P2002" });
+  });
+
+  it("10. Telefone duplicado é rejeitado no banco", async () => {
+    const first = await prisma.user.create({ data: { email: "phone1@test.local", name: "Primeiro", phoneE164: "+5511987654321" } });
+    expect(first.phoneE164).toBe("+5511987654321");
+    await expect(prisma.user.create({ data: { email: "phone2@test.local", name: "Segundo", phoneE164: "+5511987654321" } })).rejects.toMatchObject({ code: "P2002" });
+  });
+
+  it("11. Recuperação troca a senha uma vez e encerra sessões", async () => {
+    const user = await prisma.user.create({ data: {
+      email: "recovery@test.local", name: "Recuperação", role: "PARTICIPANT", status: "ACTIVE", phoneE164: "+5511987654322",
+    } });
+    const account = await prisma.account.create({ data: { userId: user.id, accountId: user.id, providerId: "credential", password: "old-hash" } });
+    await prisma.session.create({ data: { userId: user.id, token: "recovery-test-session", expiresAt: new Date(Date.now() + 3600000) } });
+    const url = await requestPasswordRecovery("11 98765-4322", "127.0.0.42", "http://localhost:3000");
+    expect(url).toContain("/recuperar-senha/");
+    const token = url!.split("/").at(-1)!;
+    await expect(completePasswordRecovery(token, "nova-senha-123", "127.0.0.42")).resolves.toBe(true);
+    expect((await prisma.account.findUnique({ where: { id: account.id } }))!.password).not.toBe("old-hash");
+    expect(await prisma.session.count({ where: { userId: user.id } })).toBe(0);
+    await expect(completePasswordRecovery(token, "nova-senha-456", "127.0.0.42")).rejects.toThrow(/inválido ou expirado/);
+  });
+
+  it("12. Cadastro por convite persiste WhatsApp no usuário", async () => {
+    const program = await prisma.program.findUnique({ where: { slug: "passaporte-jrc-2026" } });
+    const invitation = await prisma.invitation.create({ data: {
+      programId: program!.id, tokenHash: `test-phone-invite-${Date.now()}`, status: "AVAILABLE", recipientPhoneE164: "+5511987654323",
+    } });
+    await prisma.pendingRegistration.create({ data: {
+      programId: program!.id, invitationId: invitation.id, normalizedEmail: "phone-signup@test.local", name: "Cadastro Telefone",
+      phoneE164: "+5511987654323", expiresAt: new Date(Date.now() + 300000), status: "OTP_VERIFIED",
+    } });
+    await expect(auth.api.signUpEmail({ body: {
+      name: "Cadastro Telefone", email: "phone-signup@test.local", password: "senha-segura-123",
+      phoneE164: "+5511987654323", realEstateAgency: "Imobiliária Teste",
+    } })).rejects.toThrow();
+    await withInvitationContext({ invitationId: invitation.id, email: "phone-signup@test.local", phoneE164: "+5511987654323" }, () => auth.api.signUpEmail({ body: {
+      name: "Cadastro Telefone", email: "phone-signup@test.local", password: "senha-segura-123",
+      phoneE164: "+5511987654323", realEstateAgency: "Imobiliária Teste",
+    } }));
+    const user = await prisma.user.findUnique({ where: { email: "phone-signup@test.local" } });
+    expect(user?.phoneE164).toBe("+5511987654323");
+  });
+
+  it("13. Token adicional preserva o convite original", async () => {
+    const program = await prisma.program.findUnique({ where: { slug: "passaporte-jrc-2026" } });
+    const original = generateSecureToken(32);
+    const invitation = await prisma.invitation.create({ data: { programId: program!.id, tokenHash: hashInvitationToken(original) } });
+    const delivery = generateSecureToken(32);
+    await prisma.invitationDeliveryToken.create({ data: { invitationId: invitation.id, tokenHash: hashInvitationToken(delivery) } });
+    expect((await getInvitationByToken(original))?.id).toBe(invitation.id);
+    expect((await getInvitationByToken(delivery))?.id).toBe(invitation.id);
   });
 });

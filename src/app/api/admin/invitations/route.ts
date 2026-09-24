@@ -6,6 +6,7 @@ import { UserRole, InvitationStatus } from "@prisma/client";
 import { generateSecureToken, hashInvitationToken, normalizeEmail } from "@/lib/security/crypto";
 import nodemailer from "nodemailer";
 import { createAuditLog } from "@/lib/domain/audit";
+import { normalizeBrazilianMobile } from "@/lib/security/phone";
 
 export async function GET(req: NextRequest) {
   try {
@@ -39,9 +40,10 @@ export async function POST(req: NextRequest) {
     const baseUrl = process.env.APP_URL || origin || "http://localhost:3000";
 
     // Caso 1: Convite nominal para cliente específico
-    if (body.recipientName || body.recipientEmail) {
+    if (body.recipientName || body.recipientEmail || body.recipientPhone) {
       const recipientName = body.recipientName?.trim() || "";
       const recipientEmail = body.recipientEmail ? normalizeEmail(body.recipientEmail) : null;
+      const recipientPhoneE164 = body.recipientPhone ? normalizeBrazilianMobile(body.recipientPhone) : null;
 
       const program = await getOrCreateDefaultProgram();
       const rawToken = generateSecureToken(32);
@@ -58,6 +60,15 @@ export async function POST(req: NextRequest) {
         }
 
         const capacity = lockedProgram[0].capacity;
+
+        if (recipientPhoneE164) {
+          const registered = await tx.user.findUnique({ where: { phoneE164: recipientPhoneE164 } });
+          if (registered) throw new Error("Este WhatsApp já possui cadastro no Passaporte JRC.");
+          const activeInvitation = await tx.invitation.findFirst({
+            where: { recipientPhoneE164, status: { in: ["AVAILABLE", "SENT", "USED"] } },
+          });
+          if (activeInvitation) throw new Error("Este WhatsApp já possui um convite ativo.");
+        }
 
         // Contabiliza convites utilizáveis e utilizados
         const activeCount = await tx.invitation.count({
@@ -80,6 +91,7 @@ export async function POST(req: NextRequest) {
             status: InvitationStatus.SENT,
             claimedName: recipientName || null,
             claimedEmail: recipientEmail || null,
+            recipientPhoneE164,
             createdById: session.user.id,
             sentAt: new Date(),
           },
