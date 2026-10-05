@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
       themeImageUrl: program.themeImageUrl || "/brand/passaporte-template.jpg",
       loginLogoUrl: program.loginLogoUrl,
       themeTitle: program.themeTitle || "Passaporte JRC",
-      themeSubtitle: program.themeSubtitle || "Dezembro é seu. Se você estiver lá até o fim.",
+      themeSubtitle: program.themeSubtitle || "Setembro de 2027 é seu. Se você estiver lá até o fim.",
     });
   } catch (err: unknown) {
     return NextResponse.json(

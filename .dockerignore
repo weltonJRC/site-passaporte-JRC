@@ -3,12 +3,9 @@
 .next
 node_modules
 coverage
-test-results
-playwright-report
-backups
-.env*
-*.pem
-*.key
-*.cert
 *.log
-*.tsbuildinfo
+.env
+.env.*
+!.env.example
+*.zip
+*.pdf

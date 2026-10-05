@@ -1,3 +1,15 @@
+import { resolveStoredMobile } from "../security/phone";
+
+export function matchingRegisteredRecipients<T extends { phoneE164: string | null; phone: string | null }>(phoneE164: string, users: T[]): T[] {
+  return users.filter((user) => resolveStoredMobile(user.phoneE164, user.phone) === phoneE164);
+}
+
+export function campaignKindForStatus(status: string): "LOGIN" | "INVITATION" | null {
+  if (status === "USED") return "LOGIN";
+  if (status === "AVAILABLE" || status === "SENT" || status === "EXPIRED") return "INVITATION";
+  return null;
+}
+
 export function buildCampaignMessage(input: { kind: "LOGIN" | "INVITATION"; name: string; url: string }) {
   const name = input.name.trim() || "participante";
   const header = "🎟️ Passaporte Bar JRC — 40 Anos";

@@ -5,7 +5,7 @@ import { normalizeEmail } from "@/lib/security/crypto";
 import { createAuditLog } from "@/lib/domain/audit";
 import { checkRateLimit } from "@/lib/rate-limit/postgres-rate-limit";
 import { InvitationStatus, RegistrationStatus } from "@prisma/client";
-import { normalizeBrazilianMobile } from "@/lib/security/phone";
+import { hasLegacyPhoneMatch, normalizeBrazilianMobile } from "@/lib/security/phone";
 import { getInvitationByToken } from "@/lib/domain/invitations";
 import { withInvitationContext } from "@/lib/auth/invitation-context";
 
@@ -104,6 +104,10 @@ export async function POST(req: NextRequest) {
     if (existingPhone) {
       return NextResponse.json({ error: "Este WhatsApp já possui cadastro. Entre pela tela de login." }, { status: 409 });
     }
+    const legacyUsers = await prisma.user.findMany({ where: { phone: { not: null } }, select: { id: true, phone: true } });
+    if (hasLegacyPhoneMatch(phoneE164, legacyUsers)) {
+      return NextResponse.json({ error: "Este WhatsApp já possui cadastro. Entre pela tela de login." }, { status: 409 });
+    }
 
     // 4. Verificação rápida prévia do convite (sem travar pool)
     const checkInv = await getInvitationByToken(token.trim());
@@ -113,6 +117,10 @@ export async function POST(req: NextRequest) {
         { error: "Este link de convite é inválido ou já foi excluído no painel administrativo. Por favor, solicite um novo convite ao administrador." },
         { status: 400 }
       );
+    }
+
+    if (checkInv.expiresAt && checkInv.expiresAt <= new Date()) {
+      return NextResponse.json({ error: "Este link de convite expirou. Solicite um novo link ao administrador." }, { status: 400 });
     }
 
     if (checkInv.status !== InvitationStatus.AVAILABLE && checkInv.status !== InvitationStatus.SENT) {
@@ -145,7 +153,21 @@ export async function POST(req: NextRequest) {
         throw new Error(`Este convite foi emitido exclusivamente para o e-mail ${inv.claimedEmail}.`);
       }
 
-      const invitePhone = await tx.invitation.findUnique({ where: { id: inv.id }, select: { recipientPhoneE164: true } });
+      const invitePhone = await tx.invitation.findUnique({ where: { id: inv.id }, select: { recipientPhoneE164: true, phone: true, expiresAt: true } });
+      if (invitePhone?.expiresAt && invitePhone.expiresAt <= new Date()) {
+        throw new Error("Este link de convite expirou. Solicite um novo link ao administrador.");
+      }
+      if (invitePhone?.phone && !invitePhone.recipientPhoneE164) {
+        let registeredInvitePhone: string;
+        try {
+          registeredInvitePhone = normalizeBrazilianMobile(invitePhone.phone);
+        } catch {
+          throw new Error("O WhatsApp deste convite precisa ser corrigido pelo administrador.");
+        }
+        if (registeredInvitePhone !== phoneE164) {
+          throw new Error("Este convite foi emitido para outro número de WhatsApp.");
+        }
+      }
       if (invitePhone?.recipientPhoneE164 && invitePhone.recipientPhoneE164 !== phoneE164) {
         throw new Error("Este convite foi emitido para outro número de WhatsApp.");
       }
@@ -153,6 +175,11 @@ export async function POST(req: NextRequest) {
         where: { id: { not: inv.id }, recipientPhoneE164: phoneE164, status: { in: ["AVAILABLE", "SENT", "USED"] } },
       });
       if (otherPhone) throw new Error("Este WhatsApp já está vinculado a outro convite.");
+      const legacyInvitations = await tx.invitation.findMany({
+        where: { id: { not: inv.id }, phone: { not: null }, status: { in: ["AVAILABLE", "SENT", "USED"] } },
+        select: { id: true, phone: true },
+      });
+      if (hasLegacyPhoneMatch(phoneE164, legacyInvitations)) throw new Error("Este WhatsApp já está vinculado a outro convite.");
 
       // Lock do Programa para checagem estrita da capacidade máxima (30) - AGENTS.md 2.1
       const lockedProgram = await tx.$queryRaw<Array<{ id: string; capacity: number }>>`
@@ -187,14 +214,14 @@ export async function POST(req: NextRequest) {
           normalizedEmail: cleanEmail,
           phoneE164,
           name: name.trim(),
-          status: RegistrationStatus.OTP_VERIFIED,
+          status: RegistrationStatus.VERIFIED,
           expiresAt,
         },
         update: {
           normalizedEmail: cleanEmail,
           phoneE164,
           name: name.trim(),
-          status: RegistrationStatus.OTP_VERIFIED,
+          status: RegistrationStatus.VERIFIED,
           expiresAt,
         },
       });
@@ -243,6 +270,7 @@ export async function POST(req: NextRequest) {
     });
 
     if (newUser) {
+      await prisma.user.update({ where: { id: newUser.id }, data: { phone: phoneE164 } });
       // Marca convite como USED
       await prisma.invitation.update({
         where: { id: txResult.invitationId },
@@ -305,13 +333,13 @@ export async function POST(req: NextRequest) {
       {
         success: true,
         message: "Passaporte ativado com sucesso!",
+        ...signUpData,
         user: {
           id: newUser?.id,
           name: newUser?.name,
           email: newUser?.email,
           passportNumber: newUser?.passports[0]?.passportNumber,
         },
-        ...signUpData,
       },
       { status: 200 }
     );

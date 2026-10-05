@@ -7,6 +7,8 @@ import { AdminLogoutButton } from "@/components/admin/AdminLogoutButton";
 
 export const dynamic = "force-dynamic";
 
+
+
 export default async function AdminLayout({
   children,
 }: {
@@ -24,6 +26,7 @@ export default async function AdminLayout({
     { href: "/admin/eventos", label: "Eventos" },
     { href: "/admin/participantes", label: "Participantes" },
     { href: "/admin/ranking", label: "Ranking" },
+    { href: "/admin/roleta", label: "Roleta" },
     { href: "/admin/carimbos", label: "Carimbos" },
     { href: "/admin/avaliacoes", label: "Avaliações" },
     { href: "/admin/auditoria", label: "Auditoria" },

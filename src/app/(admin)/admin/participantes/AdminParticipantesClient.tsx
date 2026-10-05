@@ -2,11 +2,13 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 
 interface ParticipantItem {
   id: string; // userId
   name: string;
   email: string;
+  phone: string | null;
   phoneE164: string | null;
   image: string | null;
   realEstateAgency: string | null;
@@ -27,7 +29,9 @@ export function AdminParticipantesClient({
   const [participants, setParticipants] = useState<ParticipantItem[]>(initialParticipants);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sessionExpired, setSessionExpired] = useState(false);
   const [success, setSuccess] = useState<string | null>(null);
+  const [recoveryLink, setRecoveryLink] = useState<{ userId: string; url: string } | null>(null);
 
   useEffect(() => {
     setParticipants(initialParticipants);
@@ -52,6 +56,7 @@ export function AdminParticipantesClient({
       });
 
       const data = await res.json();
+      if (res.status === 401) setSessionExpired(true);
       if (!res.ok) {
         throw new Error(data.error || "Erro ao excluir participante.");
       }
@@ -66,7 +71,7 @@ export function AdminParticipantesClient({
   };
 
   const handleEditPhone = async (p: ParticipantItem) => {
-    const phone = prompt(`WhatsApp de ${p.name} com DDD:`, p.phoneE164 || "");
+    const phone = prompt(`WhatsApp de ${p.name} com DDD:`, p.phoneE164 || p.phone || "");
     if (phone === null) return;
     setLoading(true);
     setError(null);
@@ -76,11 +81,31 @@ export function AdminParticipantesClient({
         body: JSON.stringify({ userId: p.id, phone }),
       });
       const body = await response.json();
-      if (!response.ok) throw new Error(body.error || "Erro ao salvar WhatsApp.");
+      if (response.status === 401) setSessionExpired(true);
+      if (!response.ok) throw new Error(response.status === 409 ? "Contato duplicado" : body.error || "Erro ao salvar WhatsApp.");
       setSuccess("WhatsApp atualizado.");
       router.refresh();
     } catch (cause: unknown) {
       setError(cause instanceof Error ? cause.message : "Erro ao salvar WhatsApp.");
+    } finally { setLoading(false); }
+  };
+
+  const handlePrepareRecovery = async (p: ParticipantItem) => {
+    setLoading(true);
+    setError(null);
+    setRecoveryLink(null);
+    try {
+      const response = await fetch("/api/admin/participants/password-recovery", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: p.id }),
+      });
+      const body = await response.json();
+      if (response.status === 401) setSessionExpired(true);
+      if (!response.ok) throw new Error(body.error || "Erro ao preparar recuperação.");
+      setRecoveryLink({ userId: p.id, url: body.whatsappUrl });
+      setSuccess(`Link de recuperação de ${p.name} preparado. Abra a conversa e confirme o envio.`);
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : "Erro ao preparar recuperação.");
     } finally { setLoading(false); }
   };
 
@@ -101,6 +126,7 @@ export function AdminParticipantesClient({
       {error && (
         <div role="alert" className="rounded-xl border border-danger/30 bg-danger/10 p-3 text-sm text-danger font-medium">
           {error}
+          {sessionExpired && <> <Link href="/login" className="underline">Entrar novamente</Link></>}
         </div>
       )}
 
@@ -158,7 +184,7 @@ export function AdminParticipantesClient({
                       )}
                     </td>
                     <td className="p-4 text-muted">{p.email}</td>
-                    <td className="p-4 text-muted">{p.phoneE164 || "Não informado"}</td>
+                    <td className="p-4 text-muted">{p.phoneE164 || p.phone || "Não informado"}</td>
                     <td className="p-4 font-mono font-bold text-secondary">{p.passportNumber}</td>
                     <td className="p-4 font-bold text-success">
                       {p.stampsCount} / 12
@@ -182,6 +208,10 @@ export function AdminParticipantesClient({
                       })}
                     </td>
                     <td className="p-4 text-right">
+                      <button onClick={() => handlePrepareRecovery(p)} disabled={loading}
+                        className="mr-2 rounded-lg border border-secondary/30 px-2.5 py-1 text-[11px] font-semibold text-secondary">Recuperar senha</button>
+                      {recoveryLink?.userId === p.id && <a href={recoveryLink.url} target="_blank" rel="noopener noreferrer"
+                        className="mr-2 inline-block rounded-lg border border-secondary/30 px-2.5 py-1 text-[11px] font-semibold text-secondary">Abrir WhatsApp</a>}
                       <button onClick={() => handleEditPhone(p)} disabled={loading}
                         className="mr-2 rounded-lg border border-primary/30 px-2.5 py-1 text-[11px] font-semibold text-primary">WhatsApp</button>
                       <button

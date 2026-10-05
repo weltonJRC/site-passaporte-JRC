@@ -3,20 +3,28 @@ import { hashPassword } from "better-auth/crypto";
 import { prisma } from "../db/prisma";
 import { checkRateLimit } from "../rate-limit/postgres-rate-limit";
 import { generateSecureToken, hashPasswordResetToken } from "../security/crypto";
-import { normalizeBrazilianMobile } from "../security/phone";
+import { normalizeBrazilianMobile, resolveStoredMobile } from "../security/phone";
 import { createAuditLog } from "./audit";
 
 export async function requestPasswordRecovery(phone: string, ipAddress: string, baseUrl: string) {
   const ipLimit = await checkRateLimit({ key: `password-recovery-ip:${ipAddress}`, limit: 5, windowSeconds: 3600 });
   if (!ipLimit.allowed) throw new Error("Muitas solicitações. Tente novamente mais tarde.");
   if (process.env.NODE_ENV === "production" && !(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASSWORD)) {
-    throw new Error("A recuperação está temporariamente indisponível.");
+    throw new Error("Peça ao administrador um link de recuperação pelo WhatsApp.");
   }
   let phoneE164: string;
   try { phoneE164 = normalizeBrazilianMobile(phone); } catch { return null; }
   const phoneLimit = await checkRateLimit({ key: `password-recovery-phone:${phoneE164}`, limit: 3, windowSeconds: 3600 });
   if (!phoneLimit.allowed) return null;
-  const user = await prisma.user.findUnique({ where: { phoneE164 }, select: { id: true, email: true, role: true, status: true } });
+  let user = await prisma.user.findUnique({ where: { phoneE164 }, select: { id: true, email: true, role: true, status: true } });
+  if (!user) {
+    const legacyMatches = (await prisma.user.findMany({
+      where: { phone: { not: null } },
+      select: { id: true, email: true, role: true, status: true, phone: true },
+    })).filter((candidate) => resolveStoredMobile(null, candidate.phone) === phoneE164);
+    if (legacyMatches.length !== 1) return null;
+    user = legacyMatches[0];
+  }
   if (!user || user.role !== "PARTICIPANT" || user.status !== "ACTIVE") return null;
 
   const token = generateSecureToken(32);
@@ -41,6 +49,30 @@ export async function requestPasswordRecovery(phone: string, ipAddress: string, 
   await prisma.passwordResetRequest.updateMany({ where: { userId: user.id, id: { not: request.id }, consumedAt: null }, data: { consumedAt: new Date() } });
   await createAuditLog({ action: "PASSWORD_RECOVERY_REQUESTED", entity: "User", entityId: user.id, ipAddress });
   return process.env.NODE_ENV === "production" ? null : url;
+}
+
+export async function prepareAdminPasswordRecovery(userId: string, baseUrl: string, adminUserId?: string) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true, name: true, role: true, status: true, phone: true, phoneE164: true },
+  });
+  if (!user || user.role !== "PARTICIPANT" || user.status !== "ACTIVE") return null;
+  const phoneE164 = resolveStoredMobile(user.phoneE164, user.phone);
+  if (!phoneE164) return null;
+  const token = generateSecureToken(32);
+  await prisma.$transaction(async (tx) => {
+    await tx.passwordResetRequest.updateMany({
+      where: { userId, consumedAt: null }, data: { consumedAt: new Date() },
+    });
+    await tx.passwordResetRequest.create({
+      data: { userId, tokenHash: hashPasswordResetToken(token), expiresAt: new Date(Date.now() + 15 * 60 * 1000) },
+    });
+    if (adminUserId) await createAuditLog({
+      actorUserId: adminUserId, actorRole: "ADMIN", action: "PASSWORD_RECOVERY_LINK_PREPARED",
+      entity: "User", entityId: userId, tx,
+    });
+  });
+  return { name: user.name, phoneE164, url: `${baseUrl.replace(/\/$/, "")}/recuperar-senha/${token}` };
 }
 
 export async function completePasswordRecovery(token: string, password: string, ipAddress: string) {

@@ -1,10 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { normalizeBrazilianMobile } from "../../src/lib/security/phone";
+import { hasLegacyPhoneMatch, normalizeBrazilianMobile, resolveStoredMobile } from "../../src/lib/security/phone";
 import { validateEventReview } from "../../src/lib/domain/event-reviews";
-import { buildCampaignMessage } from "../../src/lib/domain/campaign-message";
+import { buildCampaignMessage, campaignKindForStatus, matchingRegisteredRecipients } from "../../src/lib/domain/campaign-message";
+import { recoveryDeliveryMode } from "../../src/lib/domain/recovery-delivery-mode";
 import { hashPasswordResetToken } from "../../src/lib/security/crypto";
 
 describe("dados de contato", () => {
+  it("aproveita telefone antigo sem alterar o cadastro", () => {
+    expect(resolveStoredMobile(null, "(11) 98765-4321")).toBe("+5511987654321");
+    expect(resolveStoredMobile("+5511987654322", "(11) 98765-4321")).toBe("+5511987654322");
+  });
+
+  it("não cria link de WhatsApp para telefone antigo inválido", () => {
+    expect(resolveStoredMobile(null, "11 3456-7890")).toBeNull();
+  });
+
+  it("detecta duplicidade em cadastro legado mesmo com máscara diferente", () => {
+    const rows = [{ id: "a", phone: "(11) 98765-4321" }, { id: "b", phone: "(21) 98765-4321" }];
+    expect(hasLegacyPhoneMatch("+5511987654321", rows)).toBe(true);
+    expect(hasLegacyPhoneMatch("+5511987654321", rows, "a")).toBe(false);
+  });
   it("normaliza telefone celular brasileiro para E.164", () => {
     expect(normalizeBrazilianMobile("(11) 98765-4321")).toBe("+5511987654321");
     expect(normalizeBrazilianMobile("+55 11 98765-4321")).toBe("+5511987654321");
@@ -17,6 +32,15 @@ describe("dados de contato", () => {
 });
 
 describe("comunicação da campanha", () => {
+  it("inclui convites expirados na lista de reenvio e não inclui revogados", () => {
+    expect(campaignKindForStatus("EXPIRED")).toBe("INVITATION");
+    expect(campaignKindForStatus("USED")).toBe("LOGIN");
+    expect(campaignKindForStatus("REVOKED")).toBeNull();
+  });
+  it("identifica cliente já cadastrado pelo telefone mesmo em outro convite", () => {
+    const users = [{ id: "a", name: "Ana", phone: "(11) 98765-4321", phoneE164: null }];
+    expect(matchingRegisteredRecipients("+5511987654321", users)).toEqual(users);
+  });
   it("envia acesso ao participante já cadastrado em vez de novo cadastro", () => {
     const message = buildCampaignMessage({ kind: "LOGIN", name: "Ana", url: "https://jrc.test/login" });
     expect(message.text).toContain("Olá, Ana!");
@@ -33,6 +57,10 @@ describe("comunicação da campanha", () => {
 });
 
 describe("recuperação de acesso", () => {
+  it("mostra orientação manual quando a produção não tem SMTP", () => {
+    expect(recoveryDeliveryMode({ NODE_ENV: "production", SMTP_HOST: "", SMTP_USER: "", SMTP_PASSWORD: "" })).toBe("ADMIN_MANUAL");
+    expect(recoveryDeliveryMode({ NODE_ENV: "production", SMTP_HOST: "mail.test", SMTP_USER: "user", SMTP_PASSWORD: "pass" })).toBe("EMAIL");
+  });
   it("produz hash determinístico do token sem armazenar o segredo bruto", () => {
     const first = hashPasswordResetToken("token-de-teste");
     expect(first).toHaveLength(64);

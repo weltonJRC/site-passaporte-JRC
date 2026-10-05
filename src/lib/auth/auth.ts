@@ -1,8 +1,6 @@
 import { betterAuth } from "better-auth";
 import { prismaAdapter } from "better-auth/adapters/prisma";
-import { emailOTP } from "better-auth/plugins";
 import { prisma } from "../db/prisma";
-import { sendEmailOtp } from "../email/sender";
 import { normalizeEmail, getSecret, generateSecureToken } from "../security/crypto";
 import { UserRole, UserStatus, PassportStatus } from "@prisma/client";
 import { getInvitationContext } from "./invitation-context";
@@ -91,7 +89,7 @@ export const auth = betterAuth({
                 normalizedEmail: normalized,
                 invitationId: context.invitationId,
                 phoneE164: context.phoneE164,
-                status: "OTP_VERIFIED",
+                status: "VERIFIED",
                 expiresAt: { gt: new Date() },
                 invitation: { status: { in: ["AVAILABLE", "SENT"] } },
               },
@@ -135,14 +133,5 @@ export const auth = betterAuth({
       },
     },
   },
-  plugins: [
-    emailOTP({
-      otpLength: 6,
-      expiresIn: 300, // 5 minutos
-      sendVerificationOTP: async ({ email, otp, type }) => {
-        const otpType = type === "sign-in" ? "LOGIN" : "INVITATION_ACTIVATION";
-        await sendEmailOtp({ email, otp, type: otpType });
-      },
-    }),
-  ],
+ 
 });
